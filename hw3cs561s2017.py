@@ -2,8 +2,9 @@ import math
 import copy
 from copy import deepcopy
 from decimal import *
+import sys
 
-file_read = open('input03.txt', 'r')
+file_read = open('input02.txt', 'r')
 file_write = open('output.txt', 'w')
 query_flag = 0
 input_val = []
@@ -48,7 +49,7 @@ for dec in dec_network:
         for ele in list(dec.split()):
             if i == 0:
                 name = ele
-                bayesNet.append(name)
+                bayesNet.insert(0, name)
             if i > 1:
                 new_lst.append(ele)
             i += 1
@@ -57,6 +58,8 @@ for dec in dec_network:
     else:
         # dec = ''.join(dec.split())
         new_lst.append(dec.split())
+        # if dec == "decision":
+        #     decisionNode.append(ele)
 
 if new_lst:
     table[name] = new_lst
@@ -74,22 +77,93 @@ for x in utility:
 eutility["nodes"] = name
 eutility["values"] = rest
 
-def enumerationAsk(X, e, vars1):
-    print "inside enumeration ASK"
-    print X, e, vars1
-    QX = {}
-    QX['-'] = 1.0
-    QX['+'] = 1.0
-    print "Exit enumeration ASK"
+
+def Prb(var, val, e):
+    parents = dec_graph[var]
+    if len(parents) == 0:
+        truePrb = table[var][0][0]
+    else:
+        parentVals = []
+        for parent in parents:
+            parentVals.append(e[parent])
+        var_table = table[var]
+        count = len(parentVals)
+        for tab in var_table:
+            itr = 0
+            flag = 1
+            while itr < count:
+                if tab[itr+1] != parentVals[itr]:
+                    flag = 0
+                    break
+                itr += 1
+            if flag:
+                truePrb = tab[0]
+
+
+    if truePrb == 'decision':
+        return 1.0
+    if val == '+':
+        return float(truePrb)
+    else:
+        return 1.0 - float(truePrb)
+
+
+def normalize(QX):
+    tot = 0.0
+    for val in QX.values():
+        tot += val
+    if not (1.0 - 0.001 < tot < 1.0 + 0.001):
+        for key in QX.keys():
+            QX[key] /= tot
     return QX
 
-def sendForEnumerationAsk(x_split, edict, value):
-    if x_split[2] == '+':
-        value *= enumerationAsk(x_split[0], edict, bayesNet).get('+')
-        edict.update({x_split[0]: '+'})
+
+def enumerateAll(evars, e):
+    if len(evars) == 0: return 1.0
+    Y = evars.pop()
+    if Y in e:
+        val = Prb(Y, e[Y], e) * enumerateAll(evars, e)
+        evars.append(Y)
+        return val
     else:
-        value *= enumerationAsk(x_split[0], edict, bayesNet).get('-')
+        total = 0
+        e[Y] = '+'
+        total += Prb(Y, '+', e) * enumerateAll(evars, e)
+        e[Y] = '-'
+        total += Prb(Y, '-', e) * enumerateAll(evars, e)
+        del e[Y]
+        evars.append(Y)
+        return total
+
+
+
+def enumeration_ask(X, e, bn):
+    QX = {}
+    parents = dec_graph[X]
+    if len(parents) == 0:
+        truePrb = table[X][0][0]
+        if truePrb == 'decision':
+            QX['-'] = 1.0
+            QX['+'] = 1.0
+            return QX
+
+    for xi in ['-', '+']:
+        e[X] = xi
+        QX[xi] = enumerateAll(bn, e)
+        del e[X]
+    return normalize(QX)
+
+
+def sendForEnumerationAsk(x_split, edict):
+    QX = {}
+    if x_split[2] == '+':
+        QX = enumeration_ask(x_split[0], edict, bayesNet)
+        edict.update({x_split[0]: '+'})
+        return QX['+']
+    else:
+        QX = enumeration_ask(x_split[0], edict, bayesNet)
         edict.update({x_split[0]: '-'})
+        return QX['-']
 
 
 def findProbability(query):
@@ -104,25 +178,28 @@ def findProbability(query):
         edict = dict((x.strip()[0], '+' if x.strip()[4] == '+' else '-') for x in e)
         for x in ovar:
             x_split = x.split()
-            sendForEnumerationAsk(x_split, edict, value)
+            value *= sendForEnumerationAsk(x_split, edict)
             # if x_split[2] == '+':
             #     value = value * enumerationAsk(x_split[0], edict, bayesNet).get('+')
             #     edict.update({x_split[0]: '+'})
             # else:
             #     value = value * enumerationAsk(x_split[0], edict, bayesNet).get('-')
             #     edict.update({x_split[0]: '-'})
+        file_log += '\n'
         file_log += str(Decimal(str(value)).quantize(Decimal('.01')))
     else:
+        edict = {}
         for x in ovar:
-            edict = {}
             x_split = x.split()
-            sendForEnumerationAsk(x_split, edict, value)
+            value *= sendForEnumerationAsk(x_split, edict)
+
             # if x_split[2] == '+':
             #     value = value * enumerationAsk(x_split[0], edict, bayesNet).get('+')
             #     edict.update({x_split[0]: '+'})
             # else:
             #     value = value * enumerationAsk(x_split[0], edict, bayesNet).get('-')
             #     edict.update({x_split[0]: '-'})
+        file_log += '\n'
         file_log += str(Decimal(str(value)).quantize(Decimal('.01')))
 
     print "Exiting findProbability"
@@ -142,7 +219,6 @@ def findExpectedUtility(query):
     global eutility
     global file_log
     dict_ele = {}
-    value = 0
     prob = 0
     flag = 0
 
@@ -176,8 +252,9 @@ def findExpectedUtility(query):
             newQuery.append(tempQuery)
         if flag == 1:
             continue;
+        value = 1
         for q in newQuery:
-            sendForEnumerationAsk(q, newDict, value)
+            value *= sendForEnumerationAsk(q, newDict)
             # if newQuery[q] == "-":
             #     value = value * enumerationAsk(q, newDict, bayesNet).get('+')
             #     newDict.update({q: True})
@@ -186,13 +263,95 @@ def findExpectedUtility(query):
             #     newDict.update({q: False})
         prob += value * int(val[0])
     prob += + 0.00000001
+    file_log += '\n'
     file_log += str(int(round(prob)))
 
     return
 
 
+def decisionPosbVal(type):
+    if type == 1:
+        return [['+'],['+']]
+    elif type == 2:
+        return [['+','+'],['+','-'],['-','+'],['-','-']]
+    else:
+        return [['+', '+', '+'], ['+', '+', '-'], ['+', '-', '+'], ['+', '-', '-'], ['-', '+', '+'], ['-', '+', '-'], ['-', '-', '+'], ['-', '-', '-']]
+
+
 def findMaxExpectedUtility(query):
+    print "Entering findExpectedUtility"
     print query
+    global eutility
+    global file_log
+    dict_ele = {}
+    outputDict = {}
+    decisionNode = []
+    prob = 0
+    flag = 0
+
+    lst = query.strip().strip().split("|")
+    first_part =  lst[0].strip().split(',')
+    if len(lst) > 1:
+        for x in lst[1].strip().split(","):
+            x_split = x.strip().split()
+            update_split_value(x_split, dict_ele)
+
+    dec_count = 0
+    for tab in table:
+        if table[tab][0][0] == "decision":
+            decisionNode.append(tab)
+            dec_count += 1
+
+    for pos in decisionPosbVal(dec_count):
+        itr = 0
+        x_split = []
+        prev = -sys.maxint - 2
+        for dec in decisionNode:
+            x_split.append(dec.strip())
+            x_split.append(" ")
+            x_split.append(pos[itr])
+            update_split_value(x_split,dict_ele)
+            itr += 1
+            prob = 0
+            util_nodes = eutility["nodes"]
+            util_values = eutility["values"]
+
+            for val in util_values:
+                newQuery = []
+                tempQuery = []
+                itr = 1
+                newDict = deepcopy(dict_ele)
+                for node in util_nodes:
+                    tempQuery.append(node)
+                    tempQuery.append(' ')
+                    tempQuery.append(val[itr])
+                    # newQuery[node] = val[itr]
+                    if node in dict_ele:
+                        if val[itr] != dict_ele.get(node):
+                            flag = 1
+                            break
+                    itr = + 1
+                    newQuery.append(tempQuery)
+                if flag == 1:
+                    continue;
+                value = 1
+                for q in newQuery:
+                    value *= sendForEnumerationAsk(q, newDict)
+                prob += value * int(val[0])
+        if (prev < prob):
+            prev = prob
+            for finval in first_part:
+                outputDict.update({finval.strip(): dict_ele.get(finval.strip())})
+    pt_str = ""
+    for finval in first_part:
+        if outputDict.get(finval.strip()) == True:
+            pt_str = pt_str + '+' + ' '
+        else:
+            pt_str = pt_str + '-' + ' '
+    prev = prev + 0.00000001
+    pt_str = pt_str + str(int(round(prev)))
+    file_log += '\n'
+    file_log += pt_str
     return
 
 
